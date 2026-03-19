@@ -1,6 +1,6 @@
 # Configure the AWS Provider
 provider "aws" {
-  region = "us-west-2"
+  region = "us-east-1"
 }
 
 #Retrieve the list of AZs in the current AWS region
@@ -116,44 +116,59 @@ resource "aws_nat_gateway" "nat_gateway" {
   }
 }
 
-#create S3 Bucket
-resource "aws_s3_bucket" "my-new-S3-bucket" {
-  bucket = "my-new-tf-test-bucket-${random_id.randomness.hex}"
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
 
-  tags = {
-    Name    = "My S3 Bucket"
-    Purpose = "Intro to Resource Blocks Lab"
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
   }
 }
 
-resource "aws_s3_bucket_ownership_controls" "my_new_bucket_acl" {   
-  bucket = aws_s3_bucket.my-new-S3-bucket.id  
-  rule {     
-    object_ownership = "BucketOwnerPreferred"   
-  }
-}
-
-#Creating Security Group
-resource "aws_security_group" "my-new-security-group" {
-  name        = "web_server_inbound"
-  description = "Allow inbound traffic on tcp/443"
-  vpc_id      = aws_vpc.vpc.id
+resource "aws_security_group" "public_sg" {
+  name   = "public_sg"
+  vpc_id = aws_vpc.vpc.id
 
   ingress {
-    description = "Allow 443 from the Internet"
-    from_port   = 443
-    to_port     = 443
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = {
-    Name    = "web_server_inbound"
-    Purpose = "Intro to Resource Blocks Lab"
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/32"] # replace with your IP
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
-#Configure a resource from the random provider
-resource "random_id" "randomness" {
-  byte_length = 16
+resource "aws_instance" "public_server" {
+  ami           = data.aws_ami.amazon_linux.id
+  instance_type = "t2.micro"
+
+  subnet_id = aws_subnet.public_subnets["public_subnet_1"].id
+
+  vpc_security_group_ids = [aws_security_group.public_sg.id]
+
+  user_data = <<-EOF
+              #!/bin/bash
+              yum install -y httpd
+              systemctl start httpd
+              systemctl enable httpd
+              echo "<h1>Public Server - Terraform 🚀</h1>" > /var/www/html/index.html
+              EOF
+
+  tags = {
+    Name = "public_ec2"
+  }
 }
